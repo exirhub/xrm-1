@@ -1,5 +1,5 @@
 cd /root
-wget https://github.com/exirhub/exirvpn-balancer-config/raw/refs/heads/main/x-ui.db
+wget https://github.com/exirhub/xrm-1/raw/refs/heads/main/x-ui.db
 echo "n" | bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 sudo systemctl stop x-ui
 sudo chmod +x /root/x-ui.db
