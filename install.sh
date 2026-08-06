@@ -37,3 +37,26 @@ wget https://raw.githubusercontent.com/exirhub/exirvpn-balancer-config/refs/head
 chmod +x receiver.sh
 ./receiver.sh
 
+systemctl stop x-ui
+//EDIT BY:MEHTI v3.6
+while pgrep -x x-ui >/dev/null; do
+  sleep 1
+done
+
+rm -f /etc/x-ui/x-ui.db-wal
+rm -f /etc/x-ui/x-ui.db-shm
+
+install \
+  -o root \
+  -g root \
+  -m 600 \
+  /root/x-ui.db \
+  /etc/x-ui/x-ui.db
+
+sync
+
+systemctl start x-ui
+sleep 5
+
+systemctl status x-ui --no-pager
+journalctl -u x-ui -n 100 --no-pager
