@@ -8,7 +8,7 @@ github_dns_ready() {
 }
 
 configure_persistent_dns() {
-  local interface
+  local interface resolv_tmp
 
   if command -v systemctl >/dev/null 2>&1 && command -v resolvectl >/dev/null 2>&1; then
     install -d -m 755 /etc/systemd/resolved.conf.d
@@ -24,10 +24,23 @@ EOF
       resolvectl dns "$interface" 1.1.1.1 8.8.8.8 2>/dev/null || true
       resolvectl domain "$interface" '~.' 2>/dev/null || true
     fi
-  elif [ -w /etc/resolv.conf ]; then
-    [ -e /etc/resolv.conf.exir-backup ] || cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup
-    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
   fi
+
+  # Ubuntu cloud images may leave /etc/resolv.conf linked to a dead local stub
+  # after systemd-networkd/resolved is restarted by apt. Replace that link with
+  # a regular resolver file so later service restarts cannot break DNS again.
+  if [ -e /etc/resolv.conf ] && [ ! -e /etc/resolv.conf.exir-backup ]; then
+    cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup 2>/dev/null || true
+  fi
+  resolv_tmp="$(mktemp)" || return 1
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 9.9.9.9\noptions timeout:2 attempts:3\n' > "$resolv_tmp"
+  chmod 644 "$resolv_tmp"
+  if ! cp --remove-destination "$resolv_tmp" /etc/resolv.conf; then
+    rm -f "$resolv_tmp"
+    echo "ERROR: Could not replace /etc/resolv.conf." >&2
+    return 1
+  fi
+  rm -f "$resolv_tmp"
 }
 
 ensure_github_dns() {
