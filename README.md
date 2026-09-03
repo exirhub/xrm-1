@@ -38,6 +38,20 @@ EOF
 systemctl restart systemd-resolved || true
 resolvectl flush-caches 2>/dev/null || true
 
+# Bypass a stale 127.0.0.53 stub that can remain after network service restarts.
+if [[ -e /etc/resolv.conf && ! -e /etc/resolv.conf.exir-backup ]]; then
+    cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup || true
+fi
+RESOLV_TMP="$(mktemp)"
+printf '%s\n' \
+    'nameserver 1.1.1.1' \
+    'nameserver 8.8.8.8' \
+    'nameserver 9.9.9.9' \
+    'options timeout:2 attempts:3' > "$RESOLV_TMP"
+chmod 644 "$RESOLV_TMP"
+cp --remove-destination "$RESOLV_TMP" /etc/resolv.conf
+rm -f "$RESOLV_TMP"
+
 for attempt in {1..10}; do
     if getent ahostsv4 raw.githubusercontent.com >/dev/null 2>&1; then
         break
@@ -102,6 +116,9 @@ write_files:
 
 runcmd:
   - systemctl restart systemd-resolved
+  - cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup
+  - printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\nnameserver 9.9.9.9\noptions timeout:2 attempts:3\n' > /run/xrm-resolv.conf
+  - cp --remove-destination /run/xrm-resolv.conf /etc/resolv.conf
   - apt-get -o Acquire::Retries=5 update
   - apt-get -o Acquire::Retries=5 install -y ca-certificates curl
   - curl -fL --retry 10 --retry-all-errors --retry-delay 3 https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh -o /root/install.sh
@@ -123,6 +140,14 @@ printf '%s\n' \
   > /etc/systemd/resolved.conf.d/99-exir-dns.conf
 
 systemctl restart systemd-resolved
+
+cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup 2>/dev/null || true
+printf '%s\n' \
+  'nameserver 1.1.1.1' \
+  'nameserver 8.8.8.8' \
+  'nameserver 9.9.9.9' \
+  'options timeout:2 attempts:3' > /run/xrm-resolv.conf
+cp --remove-destination /run/xrm-resolv.conf /etc/resolv.conf
 
 cd /root
 curl -fL --retry 10 --retry-all-errors --retry-delay 3 \
