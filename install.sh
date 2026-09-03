@@ -1,3 +1,45 @@
+#!/usr/bin/env bash
+
+# Wait for cloud-init networking and repair DNS before the first GitHub request.
+github_dns_ready() {
+  getent ahostsv4 github.com >/dev/null 2>&1 &&
+    getent ahostsv4 raw.githubusercontent.com >/dev/null 2>&1
+}
+
+ensure_github_dns() {
+  local attempt interface
+
+  for attempt in 1 2 3 4 5 6; do
+    github_dns_ready && return 0
+    echo "Waiting for DNS to become available (${attempt}/6)..."
+    sleep 5
+  done
+
+  echo "DNS is unavailable; applying temporary fallback resolvers..."
+  if command -v systemctl >/dev/null 2>&1 && command -v resolvectl >/dev/null 2>&1; then
+    systemctl restart systemd-resolved 2>/dev/null || true
+    resolvectl flush-caches 2>/dev/null || true
+    interface="$(ip route show default 2>/dev/null | awk 'NR == 1 { print $5 }')"
+    if [ -n "$interface" ]; then
+      resolvectl dns "$interface" 1.1.1.1 8.8.8.8 2>/dev/null || true
+      resolvectl domain "$interface" '~.' 2>/dev/null || true
+    fi
+  elif [ -w /etc/resolv.conf ]; then
+    [ -e /etc/resolv.conf.exir-backup ] || cp -L /etc/resolv.conf /etc/resolv.conf.exir-backup
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+  fi
+
+  for attempt in 1 2 3 4 5 6; do
+    github_dns_ready && return 0
+    sleep 2
+  done
+
+  echo "ERROR: github.com could not be resolved. Check the server network/DNS configuration." >&2
+  return 1
+}
+
+ensure_github_dns || exit 1
+
 cd /root
 wget https://github.com/exirhub/xrm-1/raw/refs/heads/main/x-ui.db
 echo "n" | bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
