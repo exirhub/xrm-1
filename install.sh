@@ -73,34 +73,6 @@ download_file() {
     --output "$destination" "$url"
 }
 
-install_proxyfleet_sync() {
-  local sync_dir
-  sync_dir="$(mktemp -d)" || return 1
-  install -d -m 0755 "$sync_dir/systemd"
-
-  download_file \
-    https://raw.githubusercontent.com/exirhub/proxyfleet-xui-sync/main/install.sh \
-    "$sync_dir/install.sh" || return 1
-  download_file \
-    https://raw.githubusercontent.com/exirhub/proxyfleet-xui-sync/main/proxyfleet-xui-sync.py \
-    "$sync_dir/proxyfleet-xui-sync.py" || return 1
-  download_file \
-    https://raw.githubusercontent.com/exirhub/proxyfleet-xui-sync/main/proxyfleet-xui-sync.env.example \
-    "$sync_dir/proxyfleet-xui-sync.env.example" || return 1
-  download_file \
-    https://raw.githubusercontent.com/exirhub/proxyfleet-xui-sync/main/systemd/proxyfleet-xui-sync.service \
-    "$sync_dir/systemd/proxyfleet-xui-sync.service" || return 1
-  download_file \
-    https://raw.githubusercontent.com/exirhub/proxyfleet-xui-sync/main/systemd/proxyfleet-xui-sync.timer \
-    "$sync_dir/systemd/proxyfleet-xui-sync.timer" || return 1
-
-  chmod 700 "$sync_dir/install.sh"
-  if ! bash "$sync_dir/install.sh"; then
-    echo "ERROR: ProxyFleet XUI Sync installation failed." >&2
-    return 1
-  fi
-}
-
 # Configure DNS before apt can restart the resolver and erase per-link settings.
 configure_persistent_dns
 ensure_github_dns || exit 1
@@ -178,16 +150,5 @@ sync
 systemctl start x-ui
 sleep 5
 
-if ! systemctl is-active --quiet x-ui; then
-  echo "ERROR: x-ui.service is not running before ProxyFleet synchronization." >&2
-  systemctl status x-ui --no-pager 2>/dev/null || true
-  exit 1
-fi
-
-echo "Installing ProxyFleet XUI Sync..."
-install_proxyfleet_sync || exit 1
-
 systemctl status x-ui --no-pager
-systemctl status proxyfleet-xui-sync.timer --no-pager
-journalctl -u proxyfleet-xui-sync.service -n 100 --no-pager -o cat
 journalctl -u x-ui -n 100 --no-pager
