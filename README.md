@@ -4,6 +4,8 @@ Install **XRM-1** automatically using an OVHcloud Post-Installation Script, Clou
 
 The installer configures persistent fallback DNS resolvers before accessing GitHub. This prevents DNS failures when cloud-init or package upgrades restart `systemd-resolved`.
 
+It also installs [ProxyFleet XUI Sync](https://github.com/exirhub/proxyfleet-xui-sync), enables its systemd timer, and runs the first synchronization only after the final x-ui database has been installed. On a fresh server, the first validated non-empty Ready pool and `ADMOB-BALANCER` are created immediately.
+
 ## OVHcloud Post-Installation Script (P-I-S)
 
 Paste the complete Bash script below into the **Post-Installation Script (P-I-S)** section when creating an Ubuntu or Debian server on OVHcloud.
@@ -97,6 +99,8 @@ After the server has started, inspect the installation log and service status wi
 ```bash
 tail -f /var/log/xrm-post-install.log
 systemctl status x-ui --no-pager
+systemctl status proxyfleet-xui-sync.timer --no-pager
+journalctl -u proxyfleet-xui-sync.service -n 100 --no-pager -o cat
 ```
 
 ## Automatic Installation with Cloud-Init
