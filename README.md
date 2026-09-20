@@ -2,6 +2,8 @@
 
 Install **XRM-1** automatically using an OVHcloud Post-Installation Script, Cloud-Init, or manually through the terminal.
 
+The bootstrap commands work with older distribution-provided curl versions. The installer enables `--retry-all-errors` only when curl supports it (7.71.0 or later); older versions retain standard `--retry` behavior.
+
 The installer configures persistent fallback DNS resolvers before accessing GitHub. This prevents DNS failures when cloud-init or package upgrades restart `systemd-resolved`.
 
 The Node.js/PM2 file-upload receiver (`server.js`, port `3000`) is no longer installed. XRM-1 does not install its npm dependencies or start the upload server.
@@ -74,7 +76,7 @@ apt-get -o Acquire::Retries=5 update
 apt-get -o Acquire::Retries=5 install -y ca-certificates curl
 
 curl --fail --location \
-    --retry 10 --retry-all-errors --retry-delay 3 \
+    --retry 10 --retry-delay 3 \
     --connect-timeout 20 --max-time 300 \
     "$INSTALL_URL" --output "$INSTALL_FILE"
 
@@ -125,9 +127,7 @@ runcmd:
   - cp --remove-destination /run/xrm-resolv.conf /etc/resolv.conf
   - apt-get -o Acquire::Retries=5 update
   - apt-get -o Acquire::Retries=5 install -y ca-certificates curl
-  - curl -fL --retry 10 --retry-all-errors --retry-delay 3 https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh -o /root/install.sh
-  - chmod 700 /root/install.sh
-  - bash /root/install.sh
+  - curl -fL --retry 10 --retry-delay 3 https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh -o /root/install.sh && chmod 700 /root/install.sh && bash /root/install.sh
 ```
 
 ## Manual Installation
@@ -154,10 +154,10 @@ printf '%s\n' \
 cp --remove-destination /run/xrm-resolv.conf /etc/resolv.conf
 
 cd /root
-curl -fL --retry 10 --retry-all-errors --retry-delay 3 \
+curl -fL --retry 10 --retry-delay 3 \
   https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh \
-  -o install.sh
-chmod 700 install.sh
+  -o install.sh &&
+chmod 700 install.sh &&
 bash install.sh
 ```
 
@@ -166,7 +166,7 @@ bash install.sh
 Use this command on a server where DNS already resolves GitHub:
 
 ```bash
-curl -fL --retry 10 --retry-all-errors https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh | bash
+curl -fL --retry 10 --retry-delay 3 https://raw.githubusercontent.com/exirhub/xrm-1/main/install.sh -o /root/xrm-install.sh && bash /root/xrm-install.sh
 ```
 
 > [!IMPORTANT]
