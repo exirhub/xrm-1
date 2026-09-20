@@ -66,9 +66,17 @@ ensure_github_dns() {
 
 download_file() {
   local url="$1" destination="$2"
+  local -a retry_options=(--retry 10 --retry-delay 3)
+
+  # Older distro curl packages do not support --retry-all-errors (7.71.0+).
+  # Probe without making a request; keep standard retries on older versions.
+  if curl --retry-all-errors --version >/dev/null 2>&1; then
+    retry_options+=(--retry-all-errors)
+  fi
+
   ensure_github_dns || return 1
   curl --fail --location \
-    --retry 10 --retry-all-errors --retry-delay 3 \
+    "${retry_options[@]}" \
     --connect-timeout 15 --max-time 300 \
     --output "$destination" "$url"
 }
