@@ -1,0 +1,20 @@
+name: Installer checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax
+        run: for script in install.sh linode.sh aws.sh; do bash -n "$script"; done
+      - name: Isolated bootstrap regression tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
