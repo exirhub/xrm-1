@@ -1,0 +1,16 @@
+name: Website gateway checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y nginx openssl
+      - run: bash -n setup-site.sh
+      - run: sudo python3 -m unittest discover -s tests -p 'test_*gateway*.py' -v

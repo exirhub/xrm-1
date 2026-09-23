@@ -254,3 +254,15 @@ curl -fL --retry 10 --retry-all-errors https://raw.githubusercontent.com/exirhub
 ```text
 https://github.com/exirhub/xrm-1
 ```
+
+## Shared website gateway (optional)
+
+Serve the same Nava website on ports 80, 443 and 2083 while preserving supported
+Xray listeners. Only the XHTTP path on 2083 changes to `/api/v1/sync`; its old
+path remains available. Paths on 80/443 remain unchanged. See
+[installation, limitations and rollback](docs/site-gateway.md).
+
+Run `setup-site.sh` from a checkout with your hostname and certificate paths.
+This is separate from the fresh-server installer and never replaces your
+existing database with this repository's sample database.
+
