@@ -21,10 +21,12 @@ is served over HTTP on 80 and HTTPS on 443/2083.
   XHTTP on 2083, and the panel on 8144. An unaffected panel stays on its port.
 - If the panel uses a target public port, it moves to loopback and retains its
   existing non-root base path through nginx. A panel rooted at `/` is rejected.
+- A root WebSocket path on 443 is supported: Upgrade requests go to Xray;
+  ordinary browser requests show the website.
 - HTTP/1 XHTTP uses unbuffered proxying; HTTP/2 uses grpc_pass. WebSocket upgrade
   headers are preserved. The Xray stream's TLS/finalmask and listener sockopt
   settings are removed on these internal listeners because nginx owns the edge.
-- REALITY, raw TCP and unsupported transports, root/unsafe paths, incompatible
+- REALITY, raw TCP and unsupported transports, root XHTTP/unsafe paths, incompatible
   TLS/port combinations and unrelated port owners cause a preflight failure.
   These require a separate design; the script will not kill their processes.
 

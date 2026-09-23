@@ -61,7 +61,7 @@ def plan(db, port_free=lambda p: True):
             raise ValueError(f'Multiple listeners on {port} need explicit address mapping')
         key = network + 'Settings'
         cfg = stream.get(key, {})
-        route = safe_path(cfg.get('path', '/'))
+        route = '/' if network == 'ws' and cfg.get('path', '/') == '/' else safe_path(cfg.get('path', '/'))
         if network == 'ws' and route == NEW_PATH:
             raise ValueError('WebSocket path conflicts with XHTTP alias')
         new = copy.deepcopy(stream)
@@ -77,6 +77,8 @@ def plan(db, port_free=lambda p: True):
     if int(settings.get('webPort', '2053')) in PORTS:
         path = safe_path(settings.get('webBasePath', '/'))
         for r in routes:
+            if r['public'] != int(settings['webPort']) or (r['network'] == 'ws' and r['path'] == '/'):
+                continue
             if path.startswith(r['path']) or r['path'].startswith(path):
                 raise ValueError('Panel and proxy route paths overlap')
         if path.startswith(NEW_PATH) or NEW_PATH.startswith(path):
@@ -88,7 +90,7 @@ def plan(db, port_free=lambda p: True):
 
 
 def location(route, source, index):
-    target = route['stream'].get(route['network'] + 'Settings', {}).get('path', route['path']).rstrip('/')
+    target = route['stream'].get(route['network'] + 'Settings', {}).get('path', route['path']).rstrip('/') or '/'
     # A prefix location includes XHTTP session/sequence suffixes; exact handles bare path.
     rewrite = '' if source == target else f'rewrite ^{re.escape(source)}(.*)$ {target}$1 break;'
     base = f'''{rewrite}
@@ -120,6 +122,15 @@ def location(route, source, index):
         grpc_send_timeout 3600s;
         grpc_pass grpc://{backend};
     }}'''
+    if route['network'] == 'ws' and source == '/':
+        return f'''location / {{
+        error_page 418 = @root_ws_{index};
+        if ($http_upgrade ~* ^websocket$) {{ return 418; }}
+        try_files $uri $uri/ =404;
+    }}
+    location @root_ws_{index} {{
+        {body}
+    }}'''
     return f'location = {source} {{\n{body}\n    }}\n    location ^~ {source}/ {{\n{body}\n    }}\n    {extra}'
 
 
@@ -150,6 +161,7 @@ def render(p, domain, root=ROOT):
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
     }}''')
+        default_location = '' if any(r['network'] == 'ws' and path == '/' for r, path in mappings) else 'location / { try_files $uri $uri/ =404; }'
         tls = '' if port == 80 else f'ssl_certificate {root}/fullchain.pem;\n    ssl_certificate_key {root}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;'
         suffix = '' if port == 80 else ' ssl http2'
         servers.append(f'''server {{
@@ -159,7 +171,7 @@ def render(p, domain, root=ROOT):
     {tls}
     root {root}/website;
     index index.html;
-    location / {{ try_files $uri $uri/ =404; }}
+    {default_location}
     {chr(10).join(blocks)}
 }}''')
     return f'''worker_processes auto;

@@ -14,7 +14,7 @@ def database():
     db = sqlite3.connect(':memory:')
     db.executescript('CREATE TABLE settings(key TEXT,value TEXT); CREATE TABLE inbounds(id INTEGER,port INTEGER,protocol TEXT,listen TEXT,stream_settings TEXT,enable INTEGER,settings TEXT);')
     db.executemany('INSERT INTO settings VALUES (?,?)', [('webPort','8144'),('webBasePath','/manager/')])
-    for ident, port, net, path in [(1,443,'ws','/socket'), (2,80,'xhttp','/api/v1/video'), (3,2083,'xhttp','/eersare'), (4,8080,'xhttp','/untouched')]:
+    for ident, port, net, path in [(1,443,'ws','/'), (2,80,'xhttp','/api/v1/video'), (3,2083,'xhttp','/eersare'), (4,8080,'xhttp','/untouched')]:
         stream = dict(network=net, security='none' if port in (80,8080) else 'tls')
         stream[net+'Settings'] = dict(path=path, mode='auto')
         db.execute('INSERT INTO inbounds VALUES (?,?,?,?,?,?,?)', (ident,port,'vless','',json.dumps(stream),1,'{"clients":[{"id":"retain-me"}]}'))
@@ -61,6 +61,12 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(settings['webListen'],'127.0.0.1')
         self.assertEqual(settings['webBasePath'],'/manager/')
         self.assertIn('location ^~ /manager/',g.render(p,'example.com'))
+
+    def test_root_websocket_keeps_browser_site(self):
+        conf=g.render(g.plan(database()),'example.com')
+        self.assertIn('if ($http_upgrade ~* ^websocket$)',conf)
+        self.assertIn('location @root_ws_443_0',conf)
+        self.assertEqual(conf.count('location / {'),3)
 
     def test_domain_injection_rejected(self):
         with self.assertRaises(ValueError):g.render(g.plan(database()),'example.com; include /tmp/*')
