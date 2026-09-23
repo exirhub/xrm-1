@@ -1,12 +1,82 @@
 # XRM-1 Installer
 
-Install **XRM-1** automatically using an OVHcloud Post-Installation Script, Cloud-Init, or manually through the terminal.
+Install **XRM-1** automatically using Linode User Data/StackScript, an OVHcloud Post-Installation Script, Cloud-Init, or manually through the terminal.
 
 The installer configures persistent fallback DNS resolvers before accessing GitHub. This prevents DNS failures when cloud-init or package upgrades restart `systemd-resolved`.
 
 The Node.js/PM2 file-upload receiver (`server.js`, port `3000`) is no longer installed. XRM-1 does not install its npm dependencies or start the upload server.
 
 This change applies to new installer runs. It does not stop or uninstall Node.js, PM2, or the upload server on previously configured servers.
+
+## Linode / Akamai Cloud (recommended for Linode)
+
+Use the complete contents of [linode.sh](linode.sh), starting with
+`#!/bin/bash`. It is a standalone bootstrap; it installs its own dependencies
+before downloading the shared XRM installer.
+
+### Option A: User Data / cloud-init
+
+1. Create a **new** Linode using an Ubuntu or Debian image with the **cloud-init
+   support icon** in Cloud Manager. Not every image accepts User Data.
+2. Open **Add User Data** and paste the **entire plain-text contents of
+   `linode.sh`**. Do not paste just its URL, a Markdown code fence, or wrap it
+   in `#cloud-config`. Linode accepts a Bash user-data script with a shebang.
+3. Create the instance and allow the first-boot installer to finish.
+   User Data runs on initial provisioning, not on every reboot.
+4. If using the Linode API/CLI instead of Cloud Manager, Base64-encode the
+   contents into `metadata.user_data`; Cloud Manager expects plain text.
+
+### Option B: StackScript (when User Data is unavailable)
+
+Create a private **StackScript**, select an Ubuntu or Debian target image,
+paste all of `linode.sh` into its script field, save, then use
+**Deploy New Linode** from that StackScript. StackScripts execute shell code:
+do **not** paste the YAML Cloud-Init example below into that field.
+
+Choose **one** of these methods per instance, not both. A lock also prevents
+two copies of this Linode bootstrap from running concurrently.
+
+### Logs and troubleshooting
+
+From SSH or the Linode Lish console, run:
+
+```bash
+sudo tail -n 100 /var/log/xrm-linode.log
+sudo cat /var/lib/xrm-1/linode/status
+sudo systemctl status x-ui --no-pager
+sudo journalctl -u x-ui -n 100 --no-pager
+# User Data path only (run after boot, not from inside user-data):
+sudo cloud-init status --long
+sudo tail -n 100 /var/log/cloud-init-output.log
+```
+
+If `xrm-linode.log` does not exist, the bootstrap likely has not started:
+check the chosen image's cloud-init support, the first `#!/bin/bash` line,
+and whether the script was actually attached when the instance was created.
+If the log exists, the recorded stage (`network`, `packages`, `download`,
+`install`, or `service`) identifies where it stopped. Logs can contain panel
+credentials printed by the upstream installer; redact them before sharing.
+
+The bootstrap retries early DNS/download failures, waits/retries around APT
+locks without deleting them, works without `systemd-resolved` during bootstrap,
+and does not depend on curl's newer `--retry-all-errors` option. It reports
+success only after the shared installer succeeds, the database exists, and
+`x-ui` is active. This is a service check, not an external proxy connectivity test.
+
+> [!WARNING]
+> New servers only: XRM installs this repository's `x-ui.db`.
+> The shared installer changes DNS, disables UFW, and configures swap/network
+> settings. Restrict panel access with the Linode Cloud Firewall and change
+> imported credentials. The bootstrap does not configure that cloud firewall.
+> It refuses to overwrite an existing or partially installed X-UI deployment.
+> Re-running after a successful installation is a no-op while X-UI remains active.
+> If installation partly failed, inspect and back up the existing database;
+> do not delete it merely to bypass this guard.
+
+Akamai documentation:
+[User Data](https://techdocs.akamai.com/cloud-computing/docs/add-user-data-when-deploying-a-compute-instance),
+[Metadata / supported images](https://techdocs.akamai.com/cloud-computing/docs/overview-of-the-metadata-service),
+[StackScripts](https://techdocs.akamai.com/cloud-computing/docs/getting-started-with-stackscripts).
 
 ## OVHcloud Post-Installation Script (P-I-S)
 

@@ -65,12 +65,21 @@ ensure_github_dns() {
 }
 
 download_file() {
-  local url="$1" destination="$2"
+  local url="$1" destination="$2" attempt
   ensure_github_dns || return 1
-  curl --fail --location \
-    --retry 10 --retry-all-errors --retry-delay 3 \
-    --connect-timeout 15 --max-time 300 \
-    --output "$destination" "$url"
+  # --retry-all-errors is unavailable on older cloud images. Retry all
+  # failures explicitly, and never accept an empty/partial response.
+  for attempt in {1..10}; do
+    : > "$destination" || return 1
+    if curl --fail --show-error --location \
+      --connect-timeout 15 --max-time 300 \
+      --output "$destination" "$url" && [ -s "$destination" ]; then
+      return 0
+    fi
+    echo "Download failed (attempt $attempt/10): $url" >&2
+    [ "$attempt" -eq 10 ] || sleep 3
+  done
+  return 1
 }
 
 # Configure DNS before apt can restart the resolver and erase per-link settings.
