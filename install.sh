@@ -155,3 +155,18 @@ sleep 5
 
 systemctl status x-ui --no-pager
 journalctl -u x-ui -n 100 --no-pager
+
+# Install the shared website only after the final database import/restart.
+# A gateway error is an installer failure, not a successful partial installation.
+site_bootstrap="$(mktemp)" || exit 1
+if ! download_file https://raw.githubusercontent.com/exirhub/xrm-1/main/auto-site.sh "$site_bootstrap"; then
+  rm -f "$site_bootstrap"
+  exit 1
+fi
+if ! bash -n "$site_bootstrap" || ! bash "$site_bootstrap"; then
+  rm -f "$site_bootstrap"
+  echo "ERROR: Automatic website setup failed. Inspect /var/log/xrm-site-install.log." >&2
+  exit 1
+fi
+rm -f "$site_bootstrap"
+

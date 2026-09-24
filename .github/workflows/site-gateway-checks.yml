@@ -12,5 +12,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y nginx openssl
-      - run: bash -n setup-site.sh
+      - run: bash -n setup-site.sh && bash -n auto-site.sh && bash -n install.sh
       - run: sudo python3 -m unittest discover -s tests -p 'test_*gateway*.py' -v

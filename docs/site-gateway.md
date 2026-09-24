@@ -1,8 +1,31 @@
 # Shared website on 80, 443 and 2083
 
-This is an **opt-in migration for an existing XRM deployment**, not a replacement
-for install.sh. It never imports the repository's sample database. The initial
-XRM installer is unchanged. Keep an SSH session open during migration.
+The standard **install.sh now installs this website automatically** after its
+final x-ui database import. Linode/StackScript and other bootstraps using that
+installer inherit this behavior. No separate command, hostname or certificate
+argument is needed for the shipped database.
+
+`auto-site.sh` installs dependencies without starting nginx's default site,
+resolves one repository revision, downloads the site/gateway, and runs
+`site_gateway.py --auto --apply`. Errors fail installation visibly and are logged
+in `/var/log/xrm-site-install.log`; gateway activation failure restores the backup.
+
+Automatic mode preserves the **separate existing TLS identity on each of 443 and
+2083**, including PEM arrays embedded in the database. It does not invent a
+domain, create DNS records, or issue a trusted certificate without domain control.
+Missing/expired/ambiguous certificates fail before database migration. The
+existing Cloudflare Origin certificates retain their original hostname/trust
+limits; direct browsers may not trust them. Do not describe this as automatic
+public certificate issuance.
+
+File-based identities are symlinked to their original paths. A systemd timer
+checks hourly and reloads only after changed files pass nginx validation. Embedded
+certificates remain static until replaced. Automatic repeat runs on a healthy
+managed gateway do not migrate the database again. Existing installations are
+not remotely changed: they need the new auto-site bootstrap executed once;
+**never re-run install.sh on an existing deployment**, as it imports the sample DB.
+
+The manual mode below remains available for custom configurations.
 
 The bundled static Nava website is adapted from exirhub/test. It has no signup
 form or artificial visitor counters and needs no Node.js runtime. The same site
@@ -33,7 +56,7 @@ is served over HTTP on 80 and HTTPS on 443/2083.
 This does not fix multi-origin XHTTP session affinity. A normal site also does
 not guarantee how a CDN classifies or handles proxy traffic.
 
-## Install dependencies and obtain the checkout
+## Manual mode: dependencies and checkout
 
 Use the reviewed checkout containing `setup-site.sh`, `site_gateway.py`, and
 `website/`. Do not run the general XRM installer again on an existing server.
@@ -60,7 +83,7 @@ SH
 An existing nginx/Apache service on the requested ports is **not automatically
 stopped or overwritten**. Integrate that installation separately first.
 
-## Plan and apply
+## Manual mode: plan and apply
 
 Supply the actual public hostname and an existing valid certificate/key. A
 Cloudflare Origin CA certificate is suitable only when clients access through
@@ -79,8 +102,7 @@ sudo bash setup-site.sh \
 ```
 
 If your client hostname is www.shopdelivery.store, use that hostname instead.
-All public hostnames must be covered by the supplied certificate. Existing
-alternative SNI names/certificates are not automatically imported. Verify this
+All public hostnames must be covered by the supplied certificate. In manual mode, alternative SNI names/certificates are not automatically imported. Verify this
 before migrating a server serving several hostnames.
 
 The script validates nginx first, stops x-ui, takes a consistent SQLite backup,
@@ -116,7 +138,7 @@ edits/accounting would be lost. The backup remains at
 refuses to overwrite existing gateway state or this backup. After a failed run,
 inspect the retained state; do not delete the backup to bypass the guard.
 
-Certificates are copied into `/etc/xrm-site/fullchain.pem` and `privkey.pem`.
+In manual mode, certificates are copied into `/etc/xrm-site/fullchain.pem` and `privkey.pem`.
 Include these paths in your renewal deployment hook, then run:
 
 ```bash

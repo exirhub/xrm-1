@@ -3,6 +3,7 @@
 import argparse
 import copy
 import http.client
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,57 @@ NEW_PATH = '/api/v1/sync'
 
 def run(*args):
     return subprocess.run(args, check=True, capture_output=True, text=True)
+
+
+def discover_tls(db):
+    """Reuse each public listener's own identity, including embedded PEM arrays."""
+    found = {}
+    for port, raw in db.execute('SELECT port,stream_settings FROM inbounds WHERE enable=1 AND port IN (443,2083)'):
+        tls = json.loads(raw).get('tlsSettings', {})
+        certs = tls.get('certificates', [])
+        if len(certs) != 1:
+            raise ValueError(f'Port {port}: expected one TLS certificate; refusing to guess')
+        item = certs[0]
+        def pem(field, file_field):
+            if item.get(file_field):
+                path = Path(item[file_field]).resolve(strict=True)
+                return dict(file=str(path))
+            lines = item.get(field)
+            if isinstance(lines, list) and lines:
+                return dict(pem='\n'.join(lines) + '\n')
+            raise ValueError(f'Port {port}: missing {field}')
+        found[port] = dict(cert=pem('certificate', 'certificateFile'),
+                           key=pem('key', 'keyFile'))
+    if set(found) != {443,2083}:
+        raise ValueError('Automatic setup needs TLS identities on both 443 and 2083')
+    return found
+
+
+def install_tls(identities, root):
+    for port, pair in identities.items():
+        for kind, source in pair.items():
+            path = root / f'{port}-{kind}.pem'
+            if 'file' in source:
+                path.symlink_to(source['file'])
+            else:
+                path.write_text(source['pem'])
+                path.chmod(0o600)
+        run('openssl', 'x509', '-in', str(root / f'{port}-cert.pem'), '-noout', '-checkend', '0')
+
+
+def refresh_tls():
+    if not (STATE / 'active').exists():
+        return
+    paths = sorted(ROOT.glob('*-cert.pem')) + sorted(ROOT.glob('*-key.pem'))
+    if not paths:
+        paths = [ROOT / 'fullchain.pem', ROOT / 'privkey.pem']
+    digest = hashlib.sha256(b''.join(path.read_bytes() for path in paths)).hexdigest()
+    marker = STATE / 'tls-digest'
+    if marker.exists() and marker.read_text() == digest:
+        return
+    run('nginx', '-t', '-c', str(ROOT / 'nginx.conf'))
+    run('systemctl', 'reload', 'xrm-site')
+    marker.write_text(digest)
 
 
 def safe_path(value):
@@ -134,8 +186,8 @@ def location(route, source, index):
     return f'location = {source} {{\n{body}\n    }}\n    location ^~ {source}/ {{\n{body}\n    }}\n    {extra}'
 
 
-def render(p, domain, root=ROOT):
-    if not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', domain):
+def render(p, domain, root=ROOT, auto_tls=False):
+    if domain != '_' and not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', domain):
         raise ValueError('Use a DNS hostname without scheme, path, or port')
     if not re.fullmatch(r'/[A-Za-z0-9_/-]+', str(root)):
         raise ValueError('Invalid gateway directory')
@@ -162,7 +214,9 @@ def render(p, domain, root=ROOT):
         proxy_set_header Connection $connection_upgrade;
     }}''')
         default_location = '' if any(r['network'] == 'ws' and path == '/' for r, path in mappings) else 'location / { try_files $uri $uri/ =404; }'
-        tls = '' if port == 80 else f'ssl_certificate {root}/fullchain.pem;\n    ssl_certificate_key {root}/privkey.pem;\n    ssl_protocols TLSv1.2 TLSv1.3;'
+        cert_name = f'{port}-cert.pem' if auto_tls else 'fullchain.pem'
+        key_name = f'{port}-key.pem' if auto_tls else 'privkey.pem'
+        tls = '' if port == 80 else f'ssl_certificate {root}/{cert_name};\n    ssl_certificate_key {root}/{key_name};\n    ssl_protocols TLSv1.2 TLSv1.3;'
         suffix = '' if port == 80 else ' ssl http2'
         servers.append(f'''server {{
     listen {port}{suffix};
@@ -215,6 +269,7 @@ def rollback():
     backup = STATE / 'before.db'
     if not backup.exists():
         raise ValueError('No gateway database backup exists')
+    subprocess.run(['systemctl', 'disable', '--now', 'xrm-site-tls.timer'], capture_output=True)
     subprocess.run(['systemctl', 'disable', '--now', 'xrm-site'], capture_output=True)
     run('systemctl', 'stop', 'x-ui')
     with sqlite3.connect(backup) as src, sqlite3.connect(DB) as dst:
@@ -229,6 +284,8 @@ def main():
     parser.add_argument('--domain')
     parser.add_argument('--cert', type=Path)
     parser.add_argument('--key', type=Path)
+    parser.add_argument('--refresh-tls', action='store_true')
+    parser.add_argument('--auto', action='store_true', help='Reuse existing per-port TLS identities without prompts')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--rollback', action='store_true')
     args = parser.parse_args()
@@ -239,10 +296,17 @@ def main():
     import fcntl
     lock = open('/run/lock/xrm-site.lock', 'w')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if args.refresh_tls:
+        refresh_tls()
+        return
     if args.rollback:
         rollback()
         return
-    if not args.domain or not args.cert or not args.key:
+    if args.auto and (STATE / 'active').exists():
+        run('systemctl', 'is-active', '--quiet', 'x-ui', 'xrm-site')
+        print('Website gateway already active; no database changes.')
+        return
+    if not args.auto and (not args.domain or not args.cert or not args.key):
         parser.error('--domain, --cert and --key are required (existing certificate files)')
     if not DB.is_file():
         raise ValueError('Install x-ui first; no database found')
@@ -259,10 +323,14 @@ def main():
                 raise ValueError(f'Port {port} belongs to another service. No changes made.')
     with sqlite3.connect(f'file:{DB}?mode=ro', uri=True) as db:
         p = plan(db, free)
-    config = render(p, args.domain)
-    cert = args.cert.read_bytes()
-    key = args.key.read_bytes()
-    run('openssl', 'x509', '-in', str(args.cert), '-noout', '-checkend', '0')
+        identities = discover_tls(db) if args.auto else None
+    if args.auto:
+        args.domain = args.domain or '_'
+    config = render(p, args.domain, auto_tls=args.auto)
+    if not args.auto:
+        cert = args.cert.read_bytes()
+        key = args.key.read_bytes()
+        run('openssl', 'x509', '-in', str(args.cert), '-noout', '-checkend', '0')
     print(json.dumps({'domain': args.domain, 'routes': [{k:v for k,v in r.items() if k != 'stream'} for r in p['routes']], 'panel': p['panel']}, indent=2))
     if not args.apply:
         print('Plan only. Re-run with --apply to migrate; existing client paths remain available.')
@@ -274,10 +342,13 @@ def main():
     for path in (ROOT / 'website').rglob('*'):
         path.chmod(0o755 if path.is_dir() else 0o644)
     (ROOT / 'website').chmod(0o755)
-    (ROOT / 'fullchain.pem').write_bytes(cert)
-    (ROOT / 'privkey.pem').write_bytes(key)
-    (ROOT / 'nginx.conf').write_text(config)
     try:
+        if args.auto:
+            install_tls(identities, ROOT)
+        else:
+            (ROOT / 'fullchain.pem').write_bytes(cert)
+            (ROOT / 'privkey.pem').write_bytes(key)
+        (ROOT / 'nginx.conf').write_text(config)
         run('nginx', '-t', '-c', str(ROOT / 'nginx.conf'))
     except Exception:
         shutil.rmtree(ROOT)
@@ -340,7 +411,7 @@ WantedBy=multi-user.target
             run('systemctl', 'start', 'x-ui')
         raise
     print('Gateway ready on 80/443/2083. Test real proxy traffic from your client before fleet rollout.')
-    print('Certificates were copied: renew the copies and reload xrm-site before expiry.')
+    print('Existing TLS identities preserved. File-based identities follow their original certificate paths.')
     print('Rollback: python3 site_gateway.py --rollback (restores entire saved database).')
 
 
