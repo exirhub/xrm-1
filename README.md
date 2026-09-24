@@ -255,14 +255,16 @@ curl -fL --retry 10 --retry-all-errors https://raw.githubusercontent.com/exirhub
 https://github.com/exirhub/xrm-1
 ```
 
-## Shared website gateway (optional)
+## Automatic shared website
 
-Serve the same Nava website on ports 80, 443 and 2083 while preserving supported
-Xray listeners. Only the XHTTP path on 2083 changes to `/api/v1/sync`; its old
-path remains available. Paths on 80/443 remain unchanged. See
-[installation, limitations and rollback](docs/site-gateway.md).
+The normal installer now installs the Nava website and nginx gateway automatically
+on HTTP 80 and HTTPS 443/2083. No separate website command or certificate arguments
+are needed with the shipped XRM database. Only the 2083 XHTTP path changes to
+`/api/v1/sync`; the old route remains an alias and 80/443 paths stay unchanged.
+Existing per-port TLS identities are reused, with automatic reload for renewed
+file-based certificates. See [details and rollback](docs/site-gateway.md).
 
-Run `setup-site.sh` from a checkout with your hostname and certificate paths.
-This is separate from the fresh-server installer and never replaces your
-existing database with this repository's sample database.
-
+Failures are logged to `/var/log/xrm-site-install.log` and cause installation to
+fail instead of silently claiming success. This does not provision new DNS or
+trusted certificates for unrelated domains. Existing servers are not changed
+until the new bootstrap is run; do not rerun install.sh on an existing server.

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sqlite3
 import unittest
+from unittest.mock import patch
+import tempfile
 
 spec = importlib.util.spec_from_file_location('gateway', Path(__file__).parents[1] / 'site_gateway.py')
 g = importlib.util.module_from_spec(spec)
@@ -75,5 +77,52 @@ class GatewayTests(unittest.TestCase):
         db=database();before=list(db.iterdump());backup=sqlite3.connect(':memory:');db.backup(backup)
         g.update_db(db,g.plan(db));backup.backup(db)
         self.assertEqual(before,list(db.iterdump()))
+
+
+class AutomaticGatewayTests(unittest.TestCase):
+    def test_separate_embedded_tls_identities(self):
+        db=database()
+        for port in (443,2083):
+            raw=db.execute('SELECT stream_settings FROM inbounds WHERE port=?',(port,)).fetchone()[0]
+            stream=json.loads(raw)
+            stream['tlsSettings']={'certificates':[{'certificate':[f'CERT-{port}'],'key':[f'KEY-{port}']}]}
+            db.execute('UPDATE inbounds SET stream_settings=? WHERE port=?',(json.dumps(stream),port))
+        identities=g.discover_tls(db)
+        self.assertNotEqual(identities[443],identities[2083])
+        conf=g.render(g.plan(db),'_',auto_tls=True)
+        self.assertIn('/443-cert.pem',conf)
+        self.assertIn('/2083-cert.pem',conf)
+
+    def test_missing_identity_fails_without_db_changes(self):
+        db=database();before=list(db.iterdump())
+        with self.assertRaises(ValueError):g.discover_tls(db)
+        self.assertEqual(before,list(db.iterdump()))
+
+    def test_file_certificates_follow_renewal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); source=root/'source';source.write_text('first')
+            target=root/'target';target.mkdir()
+            with patch.object(g,'run'):
+                g.install_tls({443:dict(cert={'file':str(source)},key={'file':str(source)})},target)
+            source.write_text('renewed')
+            self.assertEqual((target/'443-cert.pem').read_text(),'renewed')
+
+    def test_refresh_reloads_only_on_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'active').write_text('_')
+            (root/'443-cert.pem').write_text('cert');(root/'443-key.pem').write_text('key')
+            with patch.object(g,'ROOT',root),patch.object(g,'STATE',root),patch.object(g,'run') as run:
+                g.refresh_tls();self.assertEqual(run.call_count,2)
+                g.refresh_tls();self.assertEqual(run.call_count,2)
+                (root/'443-cert.pem').write_text('renewed')
+                g.refresh_tls();self.assertEqual(run.call_count,4)
+
+    def test_invalid_renewal_is_not_marked_applied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'active').write_text('_')
+            (root/'443-cert.pem').write_text('cert');(root/'443-key.pem').write_text('key')
+            with patch.object(g,'ROOT',root),patch.object(g,'STATE',root),patch.object(g,'run',side_effect=RuntimeError('invalid certificate')):
+                with self.assertRaises(RuntimeError):g.refresh_tls()
+                self.assertFalse((root/'tls-digest').exists())
 
 if __name__=='__main__':unittest.main()

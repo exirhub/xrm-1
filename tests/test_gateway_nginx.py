@@ -15,7 +15,10 @@ class NginxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='xrm-gateway-') as directory:
             root=Path(directory)
             subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=example.com','-keyout',str(root/'privkey.pem'),'-out',str(root/'fullchain.pem')],check=True,capture_output=True)
-            conf=g.render(g.plan(database()),'example.com',root)
+            for port in (443,2083):
+                shutil.copy(root/'fullchain.pem',root/f'{port}-cert.pem')
+                shutil.copy(root/'privkey.pem',root/f'{port}-key.pem')
+            conf=g.render(g.plan(database()),'_',root,auto_tls=True)
             for port in g.PORTS:
                 conf=conf.replace(f'listen {port}',f'listen {port + 20000}').replace(f'listen [::]:{port}',f'listen [::]:{port + 20000}')
             conf=conf.replace('/run/xrm-site.pid',str(root/'nginx.pid')).replace('/var/log/xrm-site-error.log',str(root/'error.log'))
